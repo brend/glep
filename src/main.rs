@@ -3,15 +3,6 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader, Error};
 use regex::Regex;
 
-// Output mode for the program
-enum OutputMode {
-    Simple,
-    WithFilename,
-    SimpleCount,
-    WithFilenameCount,
-    FilenameOnly,
-}
-
 // Command line options
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -28,32 +19,14 @@ struct Config {
     #[arg(short='v')]
     invert_match: bool,
 
+    #[arg(short='n')]
+    line_number: bool,
+
     #[arg()]
     pattern: Regex,
 
     #[arg()]
     files: Vec<String>,
-}
-
-impl Config {
-    fn output_mode(&self) -> OutputMode {
-        if self.filename_only {
-            return OutputMode::FilenameOnly;
-        }
-        if self.count_only {
-            if self.files.len() > 1 {
-                OutputMode::WithFilenameCount
-            } else {
-                OutputMode::SimpleCount
-            }
-        } else {
-            if self.files.len() > 1 {
-                OutputMode::WithFilename
-            } else {
-                OutputMode::Simple
-            }
-        }
-    }
 }
 
 fn main() {
@@ -78,12 +51,22 @@ fn process_input(config: Config) -> Result<u128, Error> {
         let stdin = io::stdin();
         let reader = stdin.lock();
         match_count = process_lines(reader, &config, None)?;
+        if config.count_only && match_count > 0 && !config.filename_only {
+            println!("{}", match_count);
+        }
     } else {
         // Iterate over each file
         for filename in &config.files {
             if let Ok(file) = File::open(&filename) {
                 let reader = BufReader::new(file);
                 match_count += process_lines(reader, &config, Some(&filename))?;
+                if match_count > 0 && config.count_only && !config.filename_only {
+                    if config.files.len() > 1 {
+                        println!("{}:{}", filename, match_count);
+                    } else {
+                        println!("{}", match_count);
+                    }
+                }
             } else {
                 eprintln!("Error: Could not open file {}", filename);
             }
@@ -95,54 +78,58 @@ fn process_input(config: Config) -> Result<u128, Error> {
 
 // Function to process lines from a reader
 fn process_lines<R: BufRead>(reader: R, config: &Config, filename: Option<&str>) -> Result<u128, Error> {
+    let mut line_number: u128 = 0;
     let mut match_count: u128 = 0;
-    let output_mode = config.output_mode();
     let pattern = if config.insensitive {
         Regex::new(&format!("(?i){}", config.pattern)).unwrap()
     } else {
         config.pattern.clone()
     };
     for line in reader.lines() {
+        line_number += 1;
         match line {
             Ok(content) => {
+                // Lowercase the content if the insensitive flag is set
                 let content = if config.insensitive {
                     content.to_lowercase()
                 } else {
                     content
                 };
+
+                // Check if the pattern matches the content
                 if pattern.is_match(&content) != config.invert_match {
                     match_count += 1;
-                    match output_mode {
-                        OutputMode::Simple => println!("{}", content),
-                        OutputMode::WithFilename => {
-                            if let Some(filename) = filename {
-                                println!("{}: {}", filename, content);
-                            }
-                        },
-                        OutputMode::FilenameOnly => {
-                            if let Some(filename) = filename {
-                                println!("{}", filename);
+
+                    // If the file name only flag is set, print the filename and return
+                    if config.filename_only {
+                        if let Some(filename) = filename {
+                            println!("{}", filename);
+                        } else {
+                            println!("(standard input)");
+                        }
+                        return Ok(match_count);
+                    }
+
+                    // Print the file name unless the count only flag is set
+                    if !config.count_only {
+                        if let Some(filename) = filename {
+                            if config.line_number {
+                                println!("{}:{}:{}", filename, line_number, content);
                             } else {
-                                println!("(standard input)");
+                                println!("{}:{}", filename, content);
                             }
-                            return Ok(1);
-                        },
-                        _ => (),
+                        } else {
+                            if config.line_number {
+                                println!("{}:{}", line_number, content);
+                            } else {
+                                println!("{}", content);
+                            }
+                        }
                     }
                 }
             }
             Err(error) => eprintln!("Error reading line: {}", error),
         }
-    }
-
-    match output_mode {
-        OutputMode::SimpleCount => println!("{}", match_count),
-        OutputMode::WithFilenameCount => {
-            if let Some(filename) = filename {
-                println!("{}: {}", filename, match_count);
-            }
-        },
-        _ => (),
     }
 
     Ok(match_count)
