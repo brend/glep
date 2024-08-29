@@ -1,6 +1,7 @@
 use clap::{Arg, Command};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
+use regex::Regex;
 
 enum OutputMode {
     Simple,
@@ -9,7 +10,7 @@ enum OutputMode {
 
 // Command line options
 struct Config {
-    pattern: String,
+    pattern: Regex,
     files: Vec<String>,
     output_mode: OutputMode,
 }
@@ -36,7 +37,8 @@ impl Config {
             .get_matches();
 
         // Extract the pattern and files from the matches
-        let pattern = matches.get_one::<String>("pattern").unwrap().clone();
+        let pattern_string = matches.get_one::<String>("pattern").unwrap().clone();
+        let pattern = Regex::new(&pattern_string).unwrap();
         let files = matches
             .get_many::<String>("files")
             .map(|vals| vals.cloned().collect())
@@ -75,11 +77,11 @@ fn main() {
 }
 
 // Function to process lines from a reader
-fn process_lines<R: BufRead>(reader: R, pattern: &str, output_mode: &OutputMode, filename: Option<&str>) {
+fn process_lines<R: BufRead>(reader: R, pattern: &Regex, output_mode: &OutputMode, filename: Option<&str>) {
     for line in reader.lines() {
         match line {
             Ok(content) => {
-                if content.contains(pattern) {
+                if pattern.is_match(&content) {
                     match output_mode {
                         OutputMode::Simple => println!("{}", content),
                         OutputMode::WithFilename => {
