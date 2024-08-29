@@ -2,10 +2,16 @@ use clap::{Arg, Command};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 
+enum OutputMode {
+    Simple,
+    WithFilename,
+}
+
 // Command line options
 struct Config {
     pattern: String,
     files: Vec<String>,
+    output_mode: OutputMode,
 }
 
 impl Config {
@@ -35,8 +41,13 @@ impl Config {
             .get_many::<String>("files")
             .map(|vals| vals.cloned().collect())
             .unwrap_or_else(Vec::new);
+        let output_mode = if files.len() > 1 {
+            OutputMode::WithFilename
+        } else {
+            OutputMode::Simple
+        };
 
-        Config { pattern, files }
+        Config { pattern, files, output_mode }
     }
 }
 
@@ -49,13 +60,13 @@ fn main() {
         // No files provided, read from stdin
         let stdin = io::stdin();
         let reader = stdin.lock();
-        process_lines(reader, &config.pattern);
+        process_lines(reader, &config.pattern, &config.output_mode, None);
     } else {
         // Iterate over each file
         for filename in config.files {
             if let Ok(file) = File::open(&filename) {
                 let reader = BufReader::new(file);
-                process_lines(reader, &config.pattern);
+                process_lines(reader, &config.pattern, &config.output_mode, Some(&filename));
             } else {
                 eprintln!("Error: Could not open file {}", filename);
             }
@@ -64,12 +75,19 @@ fn main() {
 }
 
 // Function to process lines from a reader
-fn process_lines<R: BufRead>(reader: R, pattern: &str) {
+fn process_lines<R: BufRead>(reader: R, pattern: &str, output_mode: &OutputMode, filename: Option<&str>) {
     for line in reader.lines() {
         match line {
             Ok(content) => {
                 if content.contains(pattern) {
-                    println!("{}", content);
+                    match output_mode {
+                        OutputMode::Simple => println!("{}", content),
+                        OutputMode::WithFilename => {
+                            if let Some(filename) = filename {
+                                println!("{}: {}", filename, content);
+                            }
+                        }
+                    }
                 }
             }
             Err(error) => eprintln!("Error reading line: {}", error),
