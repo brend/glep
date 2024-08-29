@@ -56,32 +56,37 @@ impl Config {
 fn main() {
     // Parse the command line arguments
     let config = Config::from_args();
+    let mut match_count: u128 = 0;
 
     // If file arguments have not been provided, read from stdin
     if config.files.is_empty() {
         // No files provided, read from stdin
         let stdin = io::stdin();
         let reader = stdin.lock();
-        process_lines(reader, &config.pattern, &config.output_mode, None);
+        match_count = process_lines(reader, &config.pattern, &config.output_mode, None);
     } else {
         // Iterate over each file
         for filename in config.files {
             if let Ok(file) = File::open(&filename) {
                 let reader = BufReader::new(file);
-                process_lines(reader, &config.pattern, &config.output_mode, Some(&filename));
+                match_count += process_lines(reader, &config.pattern, &config.output_mode, Some(&filename));
             } else {
                 eprintln!("Error: Could not open file {}", filename);
             }
         }
     }
+
+    std::process::exit(if match_count > 0 { 0 } else { 1 });
 }
 
 // Function to process lines from a reader
-fn process_lines<R: BufRead>(reader: R, pattern: &Regex, output_mode: &OutputMode, filename: Option<&str>) {
+fn process_lines<R: BufRead>(reader: R, pattern: &Regex, output_mode: &OutputMode, filename: Option<&str>) -> u128 {
+    let mut match_count: u128 = 0;
     for line in reader.lines() {
         match line {
             Ok(content) => {
                 if pattern.is_match(&content) {
+                    match_count += 1;
                     match output_mode {
                         OutputMode::Simple => println!("{}", content),
                         OutputMode::WithFilename => {
@@ -95,4 +100,6 @@ fn process_lines<R: BufRead>(reader: R, pattern: &Regex, output_mode: &OutputMod
             Err(error) => eprintln!("Error reading line: {}", error),
         }
     }
+
+    match_count
 }
