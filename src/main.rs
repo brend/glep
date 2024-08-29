@@ -1,11 +1,14 @@
 use clap::{Arg, Command};
 use std::fs::File;
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Error};
 use regex::Regex;
 
+// Output mode for the program
 enum OutputMode {
     Simple,
     WithFilename,
+    SimpleCount,
+    WithFilenameCount,
 }
 
 // Command line options
@@ -18,9 +21,9 @@ struct Config {
 impl Config {
     // Function to parse command line arguments and return a Config instance
     fn from_args() -> Self {
-        let matches = Command::new("echo_cli")
+        let matches = Command::new("glep")
             .version("1.0")
-            .author("Your Name <your.email@example.com>")
+            .author("Philipp Brendel <waldrumpus@gmail.com>")
             .about("Echo lines containing a specific pattern")
             .arg(
                 Arg::new("pattern")
@@ -34,6 +37,13 @@ impl Config {
                     .num_args(0..) // Indicates zero or more arguments can be provided
                     .index(2),
             )
+            .arg(
+                Arg::new("count")
+                    .short('c')
+                    .long("count")
+                    .action(clap::ArgAction::SetTrue)
+                    .help("Write only a count of selected lines to standard output"),
+            )
             .get_matches();
 
         // Extract the pattern and files from the matches
@@ -43,10 +53,19 @@ impl Config {
             .get_many::<String>("files")
             .map(|vals| vals.cloned().collect())
             .unwrap_or_else(Vec::new);
+        let count = matches.get_flag("count");
         let output_mode = if files.len() > 1 {
-            OutputMode::WithFilename
+            if count {
+                OutputMode::WithFilenameCount
+            } else {
+                OutputMode::WithFilename
+            }
         } else {
-            OutputMode::Simple
+            if count {
+                OutputMode::SimpleCount
+            } else {
+                OutputMode::Simple
+            }
         };
 
         Config { pattern, files, output_mode }
@@ -54,33 +73,44 @@ impl Config {
 }
 
 fn main() {
-    // Parse the command line arguments
     let config = Config::from_args();
-    let mut match_count: u128 = 0;
+    
+    match process_input(config) {
+        Ok(match_count) => {
+            std::process::exit(if match_count > 0 { 0 } else { 1 });
+        }
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            std::process::exit(2);
+        }
+    }
+}
 
+fn process_input(config: Config) -> Result<u128, Error> {
+    let mut match_count = 0;
     // If file arguments have not been provided, read from stdin
     if config.files.is_empty() {
         // No files provided, read from stdin
         let stdin = io::stdin();
         let reader = stdin.lock();
-        match_count = process_lines(reader, &config.pattern, &config.output_mode, None);
+        match_count = process_lines(reader, &config.pattern, &config.output_mode, None)?;
     } else {
         // Iterate over each file
         for filename in config.files {
             if let Ok(file) = File::open(&filename) {
                 let reader = BufReader::new(file);
-                match_count += process_lines(reader, &config.pattern, &config.output_mode, Some(&filename));
+                match_count += process_lines(reader, &config.pattern, &config.output_mode, Some(&filename))?;
             } else {
                 eprintln!("Error: Could not open file {}", filename);
             }
         }
     }
 
-    std::process::exit(if match_count > 0 { 0 } else { 1 });
+    Ok(match_count)
 }
 
 // Function to process lines from a reader
-fn process_lines<R: BufRead>(reader: R, pattern: &Regex, output_mode: &OutputMode, filename: Option<&str>) -> u128 {
+fn process_lines<R: BufRead>(reader: R, pattern: &Regex, output_mode: &OutputMode, filename: Option<&str>) -> Result<u128, Error> {
     let mut match_count: u128 = 0;
     for line in reader.lines() {
         match line {
@@ -93,7 +123,8 @@ fn process_lines<R: BufRead>(reader: R, pattern: &Regex, output_mode: &OutputMod
                             if let Some(filename) = filename {
                                 println!("{}: {}", filename, content);
                             }
-                        }
+                        },
+                        _ => (),
                     }
                 }
             }
@@ -101,5 +132,15 @@ fn process_lines<R: BufRead>(reader: R, pattern: &Regex, output_mode: &OutputMod
         }
     }
 
-    match_count
+    match output_mode {
+        OutputMode::SimpleCount => println!("{}", match_count),
+        OutputMode::WithFilenameCount => {
+            if let Some(filename) = filename {
+                println!("{}: {}", filename, match_count);
+            }
+        },
+        _ => (),
+    }
+
+    Ok(match_count)
 }
