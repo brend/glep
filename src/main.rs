@@ -9,6 +9,7 @@ enum OutputMode {
     WithFilename,
     SimpleCount,
     WithFilenameCount,
+    FilenameOnly,
 }
 
 // Command line options
@@ -21,6 +22,9 @@ struct Config {
     #[arg(short)]
     insensitive: bool,
 
+    #[arg(short='l')]
+    filename_only: bool,
+
     #[arg()]
     pattern: Regex,
 
@@ -30,6 +34,9 @@ struct Config {
 
 impl Config {
     fn output_mode(&self) -> OutputMode {
+        if self.filename_only {
+            return OutputMode::FilenameOnly;
+        }
         if self.count_only {
             if self.files.len() > 1 {
                 OutputMode::WithFilenameCount
@@ -107,6 +114,14 @@ fn process_lines<R: BufRead>(reader: R, pattern: &Regex, output_mode: &OutputMod
                             if let Some(filename) = filename {
                                 println!("{}: {}", filename, content);
                             }
+                        },
+                        OutputMode::FilenameOnly => {
+                            if let Some(filename) = filename {
+                                println!("{}", filename);
+                            } else {
+                                println!("(standard input)");
+                            }
+                            return Ok(1);
                         },
                         _ => (),
                     }
