@@ -7,24 +7,31 @@ use regex::Regex;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Config {
+    // -c Write only a count of selected lines to standard output
     #[arg(short)]
     count_only: bool,
 
+    // -i Perform pattern matching in searches without regard to case
     #[arg(short)]
     insensitive: bool,
 
+    // -l Write only the names of files containing selected lines to standard output
     #[arg(short='l')]
     filename_only: bool,
 
+    // -v Select lines not matching any of the specified patterns
     #[arg(short='v')]
     invert_match: bool,
 
+    // -n Precede each output line by its relative line number in the file, each file starting at line 1
     #[arg(short='n')]
     line_number: bool,
 
+    // The regular expression to search for
     #[arg()]
     pattern: Regex,
 
+    // The files to search. If no files are provided, read from stdin
     #[arg()]
     files: Vec<String>,
 }
