@@ -25,6 +25,9 @@ struct Config {
     #[arg(short='l')]
     filename_only: bool,
 
+    #[arg(short='v')]
+    invert_match: bool,
+
     #[arg()]
     pattern: Regex,
 
@@ -74,13 +77,13 @@ fn process_input(config: Config) -> Result<u128, Error> {
         // No files provided, read from stdin
         let stdin = io::stdin();
         let reader = stdin.lock();
-        match_count = process_lines(reader, &config.pattern, &config.output_mode(), config.insensitive, None)?;
+        match_count = process_lines(reader, &config, None)?;
     } else {
         // Iterate over each file
         for filename in &config.files {
             if let Ok(file) = File::open(&filename) {
                 let reader = BufReader::new(file);
-                match_count += process_lines(reader, &config.pattern, &config.output_mode(), config.insensitive, Some(&filename))?;
+                match_count += process_lines(reader, &config, Some(&filename))?;
             } else {
                 eprintln!("Error: Could not open file {}", filename);
             }
@@ -91,22 +94,23 @@ fn process_input(config: Config) -> Result<u128, Error> {
 }
 
 // Function to process lines from a reader
-fn process_lines<R: BufRead>(reader: R, pattern: &Regex, output_mode: &OutputMode, case_insensitive: bool, filename: Option<&str>) -> Result<u128, Error> {
+fn process_lines<R: BufRead>(reader: R, config: &Config, filename: Option<&str>) -> Result<u128, Error> {
     let mut match_count: u128 = 0;
-    let pattern = if case_insensitive {
-        Regex::new(&format!("(?i){}", pattern)).unwrap()
+    let output_mode = config.output_mode();
+    let pattern = if config.insensitive {
+        Regex::new(&format!("(?i){}", config.pattern)).unwrap()
     } else {
-        pattern.clone()
+        config.pattern.clone()
     };
     for line in reader.lines() {
         match line {
             Ok(content) => {
-                let content = if case_insensitive {
+                let content = if config.insensitive {
                     content.to_lowercase()
                 } else {
                     content
                 };
-                if pattern.is_match(&content) {
+                if pattern.is_match(&content) != config.invert_match {
                     match_count += 1;
                     match output_mode {
                         OutputMode::Simple => println!("{}", content),
