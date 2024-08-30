@@ -113,7 +113,7 @@ fn process_lines<R: BufRead>(reader: R, config: &Config, pattern: &Regex, filena
                 if pattern.is_match(&content) != config.invert_match {
                     match_count += 1;
 
-                    // If the file name only flag is set, print the filename and return
+                    // If the flag -l is set, print the filename and return
                     if config.filename_only {
                         if !config.quiet {
                             if let Some(filename) = filename {
