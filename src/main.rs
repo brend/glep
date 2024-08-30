@@ -3,6 +3,67 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader, Error};
 use regex::Regex;
 
+trait InputSource {
+    fn reader(&self) -> Box<dyn BufRead>;
+    fn filename(&self) -> &str;
+}
+
+struct FileInputSource {
+    filename: String,
+}
+
+impl InputSource for FileInputSource {
+    fn reader(&self) -> Box<dyn BufRead> {
+        if self.filename == "-" {
+            Box::new(io::stdin().lock())
+        } else {
+            Box::new(BufReader::new(File::open(&self.filename).unwrap()))
+        }
+    }
+
+    fn filename(&self) -> &str {
+        &self.filename
+    }
+}
+
+#[allow(dead_code)]
+struct TestInputSource {
+    lines: Vec<String>,
+}
+
+impl InputSource for TestInputSource {
+    fn reader(&self) -> Box<dyn BufRead> {
+        Box::new(io::Cursor::new(self.lines.join("\n")))
+    }
+
+    fn filename(&self) -> &str {
+        "test"
+    }
+}
+
+trait OutputTarget {
+    fn write(&mut self, message: &str);
+}
+
+struct StdoutTarget;
+
+impl OutputTarget for StdoutTarget {
+    fn write(&mut self, message: &str) {
+        println!("{}", message);
+    }
+}
+
+#[allow(dead_code)]
+struct TestOutputTarget {
+    messages: Vec<String>,
+}
+
+impl OutputTarget for TestOutputTarget {
+    fn write(&mut self, message: &str) {
+        self.messages.push(message.to_string());
+    }
+}
+
 // Command line options
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -42,8 +103,23 @@ struct Config {
 
 fn main() {
     let config = Config::parse();
+
+    // Create input sources based on the config
+    let input_sources: Vec<Box<dyn InputSource>> = if config.files.is_empty() {
+        vec![Box::new(FileInputSource {
+            filename: "-".to_string(),
+        })]
+    } else {
+        config.files.iter().map(|filename| {
+            Box::new(FileInputSource {
+                filename: filename.clone(),
+            }) as Box<dyn InputSource>
+        }).collect()
+    };
+
+    let mut output = StdoutTarget;
     
-    match process_input(config) {
+    match process_input(config, input_sources, &mut output) {
         Ok(match_count) => {
             std::process::exit(if match_count > 0 { 0 } else { 1 });
         }
@@ -54,7 +130,7 @@ fn main() {
     }
 }
 
-fn process_input(config: Config) -> Result<u128, Error> {
+fn process_input(config: Config, input_sources: Vec<Box<dyn InputSource>>, output: &mut dyn OutputTarget) -> Result<u128, Error> {
     let mut total_match_count = 0;
     
     // Create a regex pattern that is case insensitive if the insensitive flag is set
@@ -64,35 +140,24 @@ fn process_input(config: Config) -> Result<u128, Error> {
         config.pattern.clone()
     };
 
-    let files = if config.files.is_empty() {
-        vec!["-".to_string()]
-    } else {
-        config.files.clone()
-    };
+    let file_count = input_sources.len();
 
-    let file_count = files.len();
-
-    for filename in files {
-        let reader: Box<dyn BufRead> = if filename == "-" {
-            Box::new(io::stdin().lock())
-        } else {
-            Box::new(BufReader::new(File::open(&filename)?))
-        };
-
-        let match_count = process_lines(reader, &config, &pattern, &filename)?;
+    for input_source in input_sources {
+        let reader = input_source.reader();
+        let match_count = process_lines(input_source.filename(), reader, output, &config, &pattern)?;
 
         if config.count_only && match_count > 0 && !config.quiet {
             if file_count > 1 {
-                println!("{}:{}", filename, match_count);
+                output.write(&format!("{}:{}", input_source.filename(), match_count));
             } else {
-                println!("{}", match_count);
+                output.write(&format!("{}", match_count));
             }
         }
 
         total_match_count += match_count;
 
         if match_count > 0 && config.filename_only && !config.quiet {
-            println!("{}", filename);
+            output.write(&input_source.filename());
             if config.quiet {
                 break;
             }
@@ -102,14 +167,13 @@ fn process_input(config: Config) -> Result<u128, Error> {
     Ok(total_match_count)
 }
 
-fn process_lines<R: BufRead>(reader: R, config: &Config, pattern: &Regex, filename: &str) -> Result<u128, Error> {
+fn process_lines<R: BufRead>(filename: &str, reader: R, output: &mut dyn OutputTarget, config: &Config, pattern: &Regex) -> Result<u128, Error> {
     let mut line_number: u128 = 0;
     let mut match_count: u128 = 0;
     
     for line in reader.lines() {
         line_number += 1;
         let content = line?;
-
         let matched = pattern.is_match(&content) != config.invert_match;
         if matched {
             match_count += 1;
@@ -122,15 +186,15 @@ fn process_lines<R: BufRead>(reader: R, config: &Config, pattern: &Regex, filena
             if !config.count_only {
                 if config.files.len() > 1 {
                     if config.line_number {
-                        println!("{}:{}:{}", filename, line_number, content);
+                        output.write(&format!("{}:{}:{}", filename, line_number, content));
                     } else {
-                        println!("{}:{}", filename, content);
+                        output.write(&format!("{}:{}", filename, content));
                     }
                 } else {
                     if config.line_number {
-                        println!("{}:{}", line_number, content);
+                        output.write(&format!("{}:{}", line_number, content));
                     } else {
-                        println!("{}", content);
+                        output.write(&format!("{}", content));
                     }
                 }
             }
@@ -138,4 +202,131 @@ fn process_lines<R: BufRead>(reader: R, config: &Config, pattern: &Regex, filena
     }
 
     Ok(match_count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_no_match() {
+        let config = Config {
+            count_only: false,
+            insensitive: false,
+            filename_only: false,
+            invert_match: false,
+            line_number: false,
+            quiet: false,
+            pattern: Regex::new("foo").unwrap(),
+            files: vec![],
+        };
+
+        let input_sources: Vec<Box<dyn InputSource>> = vec![Box::new(TestInputSource {
+            lines: vec!["bar".to_string()],
+        })];
+        let mut output = TestOutputTarget { messages: vec![] };
+
+        let result = process_input(config, input_sources, &mut output).unwrap();
+        assert_eq!(result, 0);
+        assert!(output.messages.is_empty());
+    }
+
+    #[test]
+    fn test_match() {
+        let config = Config {
+            count_only: false,
+            insensitive: false,
+            filename_only: false,
+            invert_match: false,
+            line_number: false,
+            quiet: false,
+            pattern: Regex::new("foo").unwrap(),
+            files: vec![],
+        };
+
+        let input_sources: Vec<Box<dyn InputSource>> = vec![Box::new(TestInputSource {
+            lines: vec!["This line contains the word foo!".to_string()],
+        })];
+        let mut output = TestOutputTarget { messages: vec![] };
+
+        let result = process_input(config, input_sources, &mut output).unwrap();
+
+        assert_eq!(result, 1);
+        assert_eq!(output.messages.len(), 1);
+        assert_eq!(output.messages[0], "This line contains the word foo!");
+    }
+
+    #[test]
+    fn test_match_count() {
+        let config = Config {
+            count_only: true,
+            insensitive: false,
+            filename_only: false,
+            invert_match: false,
+            line_number: false,
+            quiet: false,
+            pattern: Regex::new("foo").unwrap(),
+            files: vec![],
+        };
+
+        let input_sources: Vec<Box<dyn InputSource>> = vec![Box::new(TestInputSource {
+            lines: vec!["This line contains the word foo!".to_string()],
+        })];
+        let mut output = TestOutputTarget { messages: vec![] };
+
+        let result = process_input(config, input_sources, &mut output).unwrap();
+
+        assert_eq!(result, 1);
+        assert_eq!(output.messages.len(), 1);
+        assert_eq!(output.messages[0], "1");
+    }
+
+    #[test]
+    fn test_match_filename_only() {
+        let config = Config {
+            count_only: false,
+            insensitive: false,
+            filename_only: true,
+            invert_match: false,
+            line_number: false,
+            quiet: false,
+            pattern: Regex::new("foo").unwrap(),
+            files: vec!["test".to_string()],
+        };
+
+        let input_sources: Vec<Box<dyn InputSource>> = vec![Box::new(TestInputSource {
+            lines: vec!["This line contains the word foo!".to_string()],
+        })];
+        let mut output = TestOutputTarget { messages: vec![] };
+
+        let result = process_input(config, input_sources, &mut output).unwrap();
+
+        assert_eq!(result, 1);
+        assert_eq!(output.messages.len(), 1);
+        assert_eq!(output.messages[0], "test");
+    }
+
+    #[test]
+    fn test_match_quiet() {
+        let config = Config {
+            count_only: false,
+            insensitive: false,
+            filename_only: false,
+            invert_match: false,
+            line_number: false,
+            quiet: true,
+            pattern: Regex::new("foo").unwrap(),
+            files: vec![],
+        };
+
+        let input_sources: Vec<Box<dyn InputSource>> = vec![Box::new(TestInputSource {
+            lines: vec!["This line contains the word foo!".to_string()],
+        })];
+        let mut output = TestOutputTarget { messages: vec![] };
+
+        let result = process_input(config, input_sources, &mut output).unwrap();
+
+        assert_eq!(result, 1);
+        assert_eq!(output.messages.len(), 0);
+    }
 }
