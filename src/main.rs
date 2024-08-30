@@ -16,15 +16,15 @@ struct Config {
     insensitive: bool,
 
     /// Write only the names of files containing selected lines to standard output
-    #[arg(short='l')]
+    #[arg(short = 'l')]
     filename_only: bool,
 
     /// Select lines not matching any of the specified patterns
-    #[arg(short='v')]
+    #[arg(short = 'v')]
     invert_match: bool,
 
     /// Precede each output line by its relative line number in the file, each file starting at line 1
-    #[arg(short='n')]
+    #[arg(short = 'n')]
     line_number: bool,
 
     /// Quiet; do not write anything to standard output
@@ -55,7 +55,8 @@ fn main() {
 }
 
 fn process_input(config: Config) -> Result<u128, Error> {
-    let mut match_count = 0;
+    let mut total_match_count = 0;
+    
     // Create a regex pattern that is case insensitive if the insensitive flag is set
     let pattern = if config.insensitive {
         Regex::new(&format!("(?i){}", config.pattern)).unwrap()
@@ -63,95 +64,76 @@ fn process_input(config: Config) -> Result<u128, Error> {
         config.pattern.clone()
     };
 
-    if config.files.is_empty() {
-        // No files provided, read from stdin
-        let stdin = io::stdin();
-        let reader = stdin.lock();
-        match_count = process_lines(reader, &config, &pattern, None)?;
-        if config.count_only && match_count > 0 && !config.filename_only && !config.quiet {
-            println!("{}", match_count);
-        }
+    let files = if config.files.is_empty() {
+        vec!["-".to_string()]
     } else {
-        // Iterate over each file
-        for filename in &config.files {
-            if let Ok(file) = File::open(&filename) {
-                let reader = BufReader::new(file);
-                match_count += process_lines(reader, &config, &pattern, Some(&filename))?;
-                if match_count > 0 && config.count_only && !config.filename_only && !config.quiet {
-                    if config.files.len() > 1 {
-                        println!("{}:{}", filename, match_count);
-                    } else {
-                        println!("{}", match_count);
-                    }
-                }
+        config.files.clone()
+    };
+
+    let file_count = files.len();
+
+    for filename in files {
+        let reader: Box<dyn BufRead> = if filename == "-" {
+            Box::new(io::stdin().lock())
+        } else {
+            Box::new(BufReader::new(File::open(&filename)?))
+        };
+
+        let match_count = process_lines(reader, &config, &pattern, &filename)?;
+
+        if config.count_only && match_count > 0 && !config.quiet {
+            if file_count > 1 {
+                println!("{}:{}", filename, match_count);
             } else {
-                eprintln!("Error: Could not open file {}", filename);
+                println!("{}", match_count);
+            }
+        }
+
+        total_match_count += match_count;
+
+        if match_count > 0 && config.filename_only && !config.quiet {
+            println!("{}", filename);
+            if config.quiet {
+                break;
             }
         }
     }
 
-    Ok(match_count)
+    Ok(total_match_count)
 }
 
-// Function to process lines from a reader
-fn process_lines<R: BufRead>(reader: R, config: &Config, pattern: &Regex, filename: Option<&str>) -> Result<u128, Error> {
+fn process_lines<R: BufRead>(reader: R, config: &Config, pattern: &Regex, filename: &str) -> Result<u128, Error> {
     let mut line_number: u128 = 0;
     let mut match_count: u128 = 0;
     
     for line in reader.lines() {
         line_number += 1;
-        match line {
-            Ok(content) => {
-                // Lowercase the content if the insensitive flag is set
-                let content = if config.insensitive {
-                    content.to_lowercase()
-                } else {
-                    content
-                };
+        let content = line?;
 
-                // Check if the pattern matches the content
-                if pattern.is_match(&content) != config.invert_match {
-                    match_count += 1;
-
-                    // If the flag -l is set, print the filename and return
-                    if config.filename_only {
-                        if !config.quiet {
-                            if let Some(filename) = filename {
-                                println!("{}", filename);
-                            } else {
-                                println!("(standard input)");
-                            }
-                        }
-                        return Ok(match_count);
+        let matched = pattern.is_match(&content) != config.invert_match;
+        if matched {
+            match_count += 1;
+            if config.quiet {
+                return Ok(match_count);
+            }
+            if config.filename_only {
+                return Ok(match_count);
+            }
+            if !config.count_only {
+                if config.files.len() > 1 {
+                    if config.line_number {
+                        println!("{}:{}:{}", filename, line_number, content);
+                    } else {
+                        println!("{}:{}", filename, content);
                     }
-
-                    // Print the file name unless any of these flags are set: -c, -q
-                    if !config.count_only && !config.quiet {
-                        if let Some(filename) = filename {
-                            if config.files.len() > 1 {
-                                if config.line_number {
-                                    println!("{}:{}:{}", filename, line_number, content);
-                                } else {
-                                    println!("{}:{}", filename, content);
-                                }
-                            } else {
-                                if config.line_number {
-                                    println!("{}:{}", line_number, content);
-                                } else {
-                                    println!("{}", content);
-                                }
-                            }
-                        } else {
-                            if config.line_number {
-                                println!("{}:{}", line_number, content);
-                            } else {
-                                println!("{}", content);
-                            }
-                        }
+                } else {
+                    if config.line_number {
+                        println!("{}:{}", line_number, content);
+                    } else {
+                        println!("{}", content);
                     }
                 }
             }
-            Err(error) => eprintln!("Error reading line: {}", error),
         }
     }
 
