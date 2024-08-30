@@ -45,7 +45,7 @@ cargo build --release
 
 This will create an executable in the target/release directory.
 
-Usage
+## Usage
 To use the tool, run the following command:
 
 ```bash
