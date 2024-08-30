@@ -7,31 +7,35 @@ use regex::Regex;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Config {
-    // -c Write only a count of selected lines to standard output
+    /// Write only a count of selected lines to standard output
     #[arg(short)]
     count_only: bool,
 
-    // -i Perform pattern matching in searches without regard to case
+    /// Perform pattern matching in searches without regard to case
     #[arg(short)]
     insensitive: bool,
 
-    // -l Write only the names of files containing selected lines to standard output
+    /// Write only the names of files containing selected lines to standard output
     #[arg(short='l')]
     filename_only: bool,
 
-    // -v Select lines not matching any of the specified patterns
+    /// Select lines not matching any of the specified patterns
     #[arg(short='v')]
     invert_match: bool,
 
-    // -n Precede each output line by its relative line number in the file, each file starting at line 1
+    /// Precede each output line by its relative line number in the file, each file starting at line 1
     #[arg(short='n')]
     line_number: bool,
 
-    // The regular expression to search for
+    /// Quiet; do not write anything to standard output
+    #[arg(short)]
+    quiet: bool,
+
+    /// The string or regular expression to search for
     #[arg()]
     pattern: Regex,
 
-    // The files to search. If no files are provided, read from stdin
+    /// The files to search. If no files are provided, read from stdin
     #[arg()]
     files: Vec<String>,
 }
@@ -64,7 +68,7 @@ fn process_input(config: Config) -> Result<u128, Error> {
         let stdin = io::stdin();
         let reader = stdin.lock();
         match_count = process_lines(reader, &config, &pattern, None)?;
-        if config.count_only && match_count > 0 && !config.filename_only {
+        if config.count_only && match_count > 0 && !config.filename_only && !config.quiet {
             println!("{}", match_count);
         }
     } else {
@@ -73,7 +77,7 @@ fn process_input(config: Config) -> Result<u128, Error> {
             if let Ok(file) = File::open(&filename) {
                 let reader = BufReader::new(file);
                 match_count += process_lines(reader, &config, &pattern, Some(&filename))?;
-                if match_count > 0 && config.count_only && !config.filename_only {
+                if match_count > 0 && config.count_only && !config.filename_only && !config.quiet {
                     if config.files.len() > 1 {
                         println!("{}:{}", filename, match_count);
                     } else {
@@ -111,16 +115,18 @@ fn process_lines<R: BufRead>(reader: R, config: &Config, pattern: &Regex, filena
 
                     // If the file name only flag is set, print the filename and return
                     if config.filename_only {
-                        if let Some(filename) = filename {
-                            println!("{}", filename);
-                        } else {
-                            println!("(standard input)");
+                        if !config.quiet {
+                            if let Some(filename) = filename {
+                                println!("{}", filename);
+                            } else {
+                                println!("(standard input)");
+                            }
                         }
                         return Ok(match_count);
                     }
 
-                    // Print the file name unless the count only flag is set
-                    if !config.count_only {
+                    // Print the file name unless any of these flags are set: -c, -q
+                    if !config.count_only && !config.quiet {
                         if let Some(filename) = filename {
                             if config.files.len() > 1 {
                                 if config.line_number {
