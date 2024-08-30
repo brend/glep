@@ -56,7 +56,7 @@ cargo run -- <options> <pattern> <files...>
 You can also run the compiled binary directly:
 
 ```bash
-./target/release/rust-grep-tool <options> <pattern> <files...>
+./target/release/glep <options> <pattern> <files...>
 Command-Line Options
 -c, --count-only: Write only a count of selected lines to standard output.
 -i, --insensitive: Perform case-insensitive pattern matching.
